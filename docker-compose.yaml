@@ -1,0 +1,129 @@
+version: "3.9"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports: ["2181:2181"]
+    networks: [ml-scorer]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    depends_on: [zookeeper]
+    ports: ["9095:9095"]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:9095 --list || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    networks: [ml-scorer]
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.3.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash","-c"]
+    command: >
+      "
+      until kafka-topics --bootstrap-server kafka:9092 --list; do sleep 1; done;
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic transactions --partitions 3 --replication-factor 1 --config retention.ms=604800000;
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic scores       --partitions 3 --replication-factor 1 --config retention.ms=604800000;
+      kafka-topics --bootstrap-server kafka:9092 --list;
+      "
+    networks: [ml-scorer]
+    restart: on-failure
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on: [kafka]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports: ["8080:8080"]
+    networks: [ml-scorer]
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: frauddb
+    ports: ["5432:5432"]
+    networks: [ml-scorer]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d frauddb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  scores-writer:
+    build: ./scores-writer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SCORES_TOPIC: scores
+      KAFKA_GROUP_ID: scores-writer
+      KAFKA_AUTO_OFFSET_RESET: earliest
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: frauddb
+      SCORES_TABLE: scores
+    networks: [ml-scorer]
+    restart: unless-stopped
+
+  fraud-scorer:
+    build: ./fraud_detector
+    depends_on:
+      - kafka
+      - kafka-setup
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TRANSACTIONS_TOPIC: transactions
+      KAFKA_SCORES_TOPIC: scores
+      KAFKA_GROUP_ID: ml-scorer
+      KAFKA_AUTO_OFFSET_RESET: earliest
+      FRAUD_THRESHOLD: "0.5"
+    networks: [ml-scorer]
+    restart: unless-stopped
+
+  interface:
+    build: ./interface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scores-writer:
+        condition: service_started
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: frauddb
+      SCORES_TABLE: scores
+    ports: ["8501:8501"]
+    networks: [ml-scorer]
+    restart: unless-stopped
+
+networks:
+  ml-scorer:
+    driver: bridge
