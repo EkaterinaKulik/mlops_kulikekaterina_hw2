@@ -127,5 +127,6 @@ docker-compose logs <service_name>  # Например: fraud_detector, kafka, i
 Примечание:
 
 Для полной функциональности убедитесь, что:
+
 	1.	Порты 8080 (Kafka UI), 8501 (Streamlit) и 5432 (PostgreSQL) свободны на хосте.
 	2.	Docker Compose поднимает контейнеры в одной сети, чтобы сервисы могли обмениваться сообщениями через Kafka.
