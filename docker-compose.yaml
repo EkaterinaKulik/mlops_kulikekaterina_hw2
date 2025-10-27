@@ -12,7 +12,7 @@ services:
   kafka:
     image: confluentinc/cp-kafka:7.3.0
     depends_on: [zookeeper]
-    ports: ["9095:9095"]
+    ports: ["9095:9095"]  
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -22,7 +22,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     healthcheck:
-      test: ["CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:9095 --list || exit 1"]
+      test: ["CMD", "bash", "-lc", "kafka-topics --bootstrap-server kafka:9092 --list || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 20
@@ -33,14 +33,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    entrypoint: ["/bin/bash","-c"]
-    command: >
-      "
-      until kafka-topics --bootstrap-server kafka:9092 --list; do sleep 1; done;
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic transactions --partitions 3 --replication-factor 1 --config retention.ms=604800000;
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic scores       --partitions 3 --replication-factor 1 --config retention.ms=604800000;
-      kafka-topics --bootstrap-server kafka:9092 --list;
-      "
+    entrypoint: ["/bin/bash","-lc"]
+    command: |
+      until kafka-topics --bootstrap-server kafka:9092 --list; do sleep 1; done
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic transactions --partitions 3 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic scores       --partitions 3 --replication-factor 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --list
     networks: [ml-scorer]
     restart: on-failure
 
@@ -61,12 +59,14 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: frauddb
     ports: ["5432:5432"]
-    networks: [ml-scorer]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d frauddb"]
       interval: 5s
       timeout: 5s
       retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [ml-scorer]
 
   scores-writer:
     build: ./scores-writer
@@ -103,6 +103,9 @@ services:
       KAFKA_GROUP_ID: ml-scorer
       KAFKA_AUTO_OFFSET_RESET: earliest
       FRAUD_THRESHOLD: "0.5"
+      # при желании можно переопределить:
+      # MODEL_URL: https://github.com/<owner>/<repo>/releases/download/<tag>/model.cbm
+      # MODEL_PATH: /app/models/model.cbm
     networks: [ml-scorer]
     restart: unless-stopped
 
@@ -127,3 +130,6 @@ services:
 networks:
   ml-scorer:
     driver: bridge
+
+volumes:
+  pgdata:
