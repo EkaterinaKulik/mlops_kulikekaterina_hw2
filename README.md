@@ -61,9 +61,9 @@ docker-compose up --build
 
 После запуска:
 
-Streamlit UI: http://localhost:8501
-Kafka UI: http://localhost:8080
-Логи сервисов:
+- Streamlit UI: http://localhost:8501
+- Kafka UI: http://localhost:8080
+- Логи сервисов:
  ```bash 
 docker-compose logs <service_name>  # Например: fraud_detector, kafka, interface
 ```
