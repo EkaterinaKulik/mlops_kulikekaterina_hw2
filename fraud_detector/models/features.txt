@@ -1,0 +1,14 @@
+merch
+cat_id
+gender
+one_city
+us_state
+jobs
+amount
+lat
+lon
+population_city
+merchant_lat
+merchant_lon
+hour
+dayofweek
